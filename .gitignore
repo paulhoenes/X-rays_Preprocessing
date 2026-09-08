@@ -4,6 +4,8 @@ src/logger/
 outputs/
 scratch/
 tmp/
+# written by demo/demo.ipynb
+demo/output/
 
 # --- Python ---
 __pycache__/
@@ -74,3 +76,6 @@ Thumbs.db
 # --- Logs ---
 *.log
 logs/
+
+# patient data -- never in the repository
+demo/sample_data/

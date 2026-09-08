@@ -1,0 +1,158 @@
+# GENERAL:
+# Rules for DICOM preprocessing. This is the only config file for the package. 
+  # Before: default.yaml, mappings.yaml, mappings_regex.yaml. 
+  # Now: harmonized and no redudancies. 
+
+# NOTE: I inspected roughly all the extracted images and I adaped the filter mechanisms since some images got classified wrong.
+# Nevertheless its not completly garantued that a PA view is classified as oblique or vice versa..
+
+# Patterns are matched against normalized text from rules.normalize_text 
+# Hierarchical pattern matching: First pattern that occur is used!
+  # eg.: oblique" must stand before "lat"
+
+# DICOM-TAGS
+# pat_id: (0010,0010) is PatientName not PatientID ((0010,0020)).
+# in this sample: PatientName is a Pseudo-ID and suitable for key
+  # occures in each record and used in pairs.csv steckt
+tags:
+  pat_id:                     '0010|0010'
+  study_date:                 '0008|0020'
+  accession_nr:               '0008|0050'
+  modality:                   '0008|0060'
+  body_part_examined:         '0018|0015'
+  laterality:                 '0020|0060'
+  view_position:              '0018|5101'
+  series_description:         '0008|103e'
+  series_description_code:    '0008|103f'
+  study_description:          '0008|1030'
+  pixel_spacing:              '0028|0030'
+  imager_pixel_spacing:       '0018|1164'
+  samples_per_pixel:          '0028|0002'
+  rows:                       '0028|0010'
+  columns:                    '0028|0011'
+  photometric_interpretation: '0028|0004'
+
+# TAG: BodyPartExamined
+# text = SeriesDescription, danach StudyDescription
+#
+# Der free text rules over the Tag! (siehe rules.py). 
+  # Because In this cohort, some foot, knee, and cervical spine images have BodyPartExamined set to HAND
+bodypart:
+  tag:
+    foot:  ['^(?:foot|ankle|low_exm)$']
+    hand:  ['^(?:hand|up_exm)$'] 
+    other: ['^(?:cspine|vertebral column|knee|neck|pelvis|elbow|abdomen|chest|hip|lspine|shoulder|skull|tspine)$']
+  text:
+    other:
+      - '\b(?:hws|bws|lws|wirbelsaeule|dens)\b'
+      - '\b(?:knie|becken|beckenuebersicht|huefte|dexa|schulter|schaedel|thorax|abdomen)\b'
+    foot:
+      - '\b(?:fuss|vorfuss|fussgelenk|sprunggelenk|zeh|zehen)\b'
+      - '\b(?:fersenbein|sesambeine|vf sesambeine)\b'
+
+    # hand.no_joint_image is excluding non joint images (only wrist, etc.)
+    hand:
+      - '\b(?:hand|handgelenk|handwurzel|finger|daumen)\b'
+      - '\b(?:unterarm|ellenbogen|ellbogen)\b'
+
+# TAG: Laterality (Seite)
+# tag  = Laterality
+# text = SeriesDescription
+#
+# Tag is reules over! Laterality is reliable
+laterality:
+  tag:
+    R: ['^r$']
+    L: ['^l$']
+  view_tag:
+    R: ['^(?:rl|rlo)$']
+    L: ['^(?:ll|llo)$']
+  text:
+    B:
+      - '(?<!\w)vgl(?!\w)'
+      - '(?<!\w)bds(?!\w)'
+    R:
+      - '\brechts\b'
+      - '(?<!\w)re(?!\w)'
+      - '(?<!\w)r(?!\w)'
+    L:
+      - '\blinks\b'
+      - '(?<!\w)li(?!\w)'
+      - '(?<!\w)l(?!\w)'
+
+# TAG: (ViewPosition) Aufnahmerichtung
+# tag  = ViewPosition
+# text = SeriesDescription
+
+# For hand images,  Text rules over the Tag (rules.py): 
+    # Eg.:
+    # text: Zither-/Norgaard
+    # ViewPosition = "AP"
+view:
+  tag:
+    oblique: ['^(?:llo|rlo)$']
+    lat:     ['^(?:ll|rl)$']
+    dp:      ['^(?:pa|ap)$']
+  text:
+    oblique:
+      - '\b(?:schraeg|zither|zitherstellung|norgaard)\b'
+    lat:
+      - '\b(?:lat|seitl|seitlich|stl)\b'
+    dp:
+      - '\b(?:dp|dv|ap|pa)\b'
+      - '\b(?:a\s*p|d\s*p)\b'
+
+# Photometric
+photometric:
+  tag:
+    MOne: ['^monochrome1$']
+    MTwo: ['^monochrome2$']
+
+
+# BILATERAL IMAGES
+    # TRicky.. 
+    # no (100%) reliable tag found for this information .. 
+    # Solution: pixels.shows_two_hands: via pixel analysis! Only applied to Landscape orientation images
+    # aspect ratio >= 1.0 ==> Landscape orientation
+
+bilateral:
+  # Criteria if an images got checked! (All are too expensive but can be also applied if needed)
+  min_aspect_ratio: 1.0
+
+  # Minimum width for dark gap between the hands.
+  # The share of images is figgured out with try and error..
+  # Prevents false positives: higher shares of the gap splits images when the fingers are spread (creates also this gap)
+  min_gap: 0.04
+
+  # Inner thresholds of the column profile (pixels.shows_two_hands).
+  # Three levels: pixel -> column -> block. Rarely touched, only worth a look
+  # if another cohort is exposed very differently.
+  min_brightness: 0.35     # a pixel is tissue from this brightness (0 = darkest, 1 = brightest)
+  min_column_fill: 0.06    # a column is occupied from this share of tissue pixels
+  min_block_width: 0.12    # a block is a hand from this share of the image width
+
+# Special rules of Hands: 
+hand:
+  # in freetext for hands "lat"/"seitl."/"stl" -> OB View (Checked with visual inspection!)
+    # in notebooks/demo/view_analyse.ipynb
+    # Therefore its important to fitler out wrists since there seitl means lateral view not OB
+
+  # For Feets: "Fuss lat" is also a lateral view
+    # "Fuss schraeg" is oblique view
+  lat_is_oblique: true
+
+  # images of upper extremity but NOT the entire hand! (Eg wrist) -> Not suitable for scoring
+  # checking SeriesDescription and StudyDescription
+      # -> bodypart "other" 
+
+  # No Hand:
+  no_joint_image:
+    - '\bhandgelenk\b'
+    - '\bhandwurzel\b'
+    - '\bunterarm\b'
+    - '\bellenbogen\b'
+    - '\bellbogen\b'
+    - '\bfinger\b'
+    - '\bdaumen\b'
+    - '\bskaphoid\b'
+    - '\bkahnbein\b'
