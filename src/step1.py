@@ -110,7 +110,7 @@ def main():
     step2_df = df.copy()
 
 
-    step2_df = pp.categorize.add_InfosViaRegEx(step2_df)
+    step2_df = pp.rules.add_InfosViaRegEx(step2_df)
 
     logger.info("Finished columns categorizarion")
 
