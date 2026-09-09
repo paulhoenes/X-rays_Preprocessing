@@ -1,9 +1,11 @@
 # run python -W ignore::FutureWarning src/step1.py
 
 import dicom_extremities_preprocessor as pp
-from dicom_extremities_preprocessor.utils import (setup_logger, extract_metadata,
-                   get_unique_metadata, split_dicom, check_dicom_metadata,
-                   invert_monochrome, mirror_right_to_left, rebuild_filename)
+from dicom_extremities_preprocessor.header import extract_metadata
+from dicom_extremities_preprocessor.pixels import (split_dicom, check_dicom_metadata,
+                   invert_monochrome, mirror_right_to_left)
+from dicom_extremities_preprocessor.utils import (setup_logger, get_unique_metadata,
+                   rebuild_filename)
 
 
 import datetime
