@@ -21,10 +21,9 @@ dependencies = [
 dicom-extremities-preprocessor = "dicom_extremities_preprocessor.cli:main"
 
 [project.optional-dependencies]
-dev = [
-  "pre-commit>=3.5",
-  "nbstripout>=0.9.1",
-]
+# only for visualize.py -- the preprocessing itself needs no matplotlib
+plot = ["matplotlib>=3.5"]
+dev = ["pytest>=7", "matplotlib>=3.5", "pre-commit>=3.5", "nbstripout>=0.9.1"]
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -32,3 +31,9 @@ include = ["dicom_extremities_preprocessor*"]
 
 [tool.setuptools.package-data]
 dicom_extremities_preprocessor = ["config/*.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# the package writes "dp"/"oblique" into ViewPosition, a DICOM CS field with
+# standardised values -- pydicom says so once per written file
+filterwarnings = ["ignore:Invalid value for VR:UserWarning"]
