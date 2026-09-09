@@ -1,48 +1,41 @@
-# run python -W ignore::FutureWarning src/step1.py
+"""The processing steps: read headers, categorize, select, write.
 
-import dicom_extremities_preprocessor as pp
-from dicom_extremities_preprocessor.header import extract_metadata
-from dicom_extremities_preprocessor.pixels import (split_dicom, check_dicom_metadata,
-                   invert_monochrome, mirror_right_to_left)
-from dicom_extremities_preprocessor.utils import (setup_logger, get_unique_metadata,
-                   rebuild_filename)
-
-
+What gets *decided* is decided in rules.py -- here is only the order.
+"""
 import datetime
-import pandas as pd
-import numpy as np
 import os
-from pathlib import Path
-import yaml
-import pydicom
 from collections import defaultdict
+from pathlib import Path
 
-# Read config
+import pandas as pd
+import pydicom
+import yaml
+
+from . import rules
+from .header import extract_metadata
+from .pixels import (check_dicom_metadata, invert_monochrome,
+                     mirror_right_to_left, split_dicom)
+from .utils import get_unique_metadata, rebuild_filename, setup_logger
+
+CONFIG = Path(__file__).parent / "resources" / "default.yaml"
+
+
 def load_config(path):
-    with open(path, 'r') as f:
+    with open(path, "r") as f:
         return yaml.safe_load(f)
 
-ROOT = Path.cwd()
 
-config = load_config(ROOT / "dicom_extremities_preprocessor/resources/default.yaml")
+def run(input_dir, output_dir, bodypart="H", view="dp"):
+    """Read input_dir, write the processed DICOMs and tables below output_dir."""
+    input_dir, output_dir = Path(input_dir), Path(output_dir)
+    tags = load_config(CONFIG)["tags"]
 
-# Get the info from config       
-paths = config["paths"]
+    output_folder = output_dir
+    data_folder = input_dir
+    processed_dir = output_dir / "dicoms"
 
-output_folder = ROOT / paths["output_folder"]
-dicom_server = ROOT / paths["dicom_server"]
-data_folder = ROOT / paths["data_folder"]
-logger = ROOT / paths["logger"]
-
-# metadata tags
-tags = config["tags"]
-
-# Setting up logger to track each step
-logger = setup_logger(logger)
-logger.info(f"Process started: {datetime.datetime.now()}......")
-
-
-def main():
+    logger = setup_logger(output_dir)
+    logger.info(f"Process started: {datetime.datetime.now()}......")
 
     ###########################
     ##         Step 1        ##
@@ -110,7 +103,7 @@ def main():
     step2_df = df.copy()
 
 
-    step2_df = pp.rules.add_InfosViaRegEx(step2_df)
+    step2_df = rules.add_InfosViaRegEx(step2_df)
 
     logger.info("Finished columns categorizarion")
 
@@ -137,7 +130,7 @@ def main():
     # Keep only hands DP images, detect duplicates, and add a numeric suffix.
 
     # Hands dp selection
-    step3_df = step2_df[(step2_df['bodypart_new'] == 'H') & (step2_df['view_position_new'] == 'dp')].copy()
+    step3_df = step2_df[(step2_df['bodypart_new'] == bodypart) & (step2_df['view_position_new'] == view)].copy()
    
     logger.info(f"Selected only HANDS DP images. Current size of the dataset {len(step3_df)}")
           
@@ -155,7 +148,6 @@ def main():
     ###########################
     # Flatten directory structure, fix tags, mirror R→L, split B images.
 
-    processed_dir = Path(dicom_server) / 'changed_metadata_dicoms'
     processed_dir.mkdir(parents=True, exist_ok=True)
 
     standalone_df = step3_df[step3_df['laterality_new'].isin(['L', 'R'])]
@@ -265,6 +257,3 @@ def main():
     # Step 12 - fix metadata tags;
     # Step 13a - partially skip; mirroring bodyparts if another part is not present
     # Step 13b - invertion to the same Photometric Interpretation
-
-if __name__ == "__main__":
-    main()
