@@ -22,7 +22,7 @@ def load_config(path):
 
 ROOT = Path.cwd()
 
-config = load_config(ROOT / "configs/default.yaml")
+config = load_config(ROOT / "dicom_extremities_preprocessor/resources/default.yaml")
 
 # Get the info from config       
 paths = config["paths"]

@@ -17,8 +17,7 @@ def load_config(path):
 
 ROOT = Path.cwd()
 
-config = load_config(ROOT / "configs/default.yaml")
-cfg = load_config(ROOT / "configs/mappings.yaml")['categories']
+config = load_config(ROOT / "dicom_extremities_preprocessor/resources/default.yaml")
 
 
 
