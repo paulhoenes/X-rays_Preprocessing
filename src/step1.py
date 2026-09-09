@@ -1,7 +1,8 @@
 # run python -W ignore::FutureWarning src/step1.py
 
-from dicom_extremities_preprocessor.utils import (setup_logger, extract_metadata, get_unique_metadata,
-                   categorize_column, split_dicom, check_dicom_metadata,
+import dicom_extremities_preprocessor as pp
+from dicom_extremities_preprocessor.utils import (setup_logger, extract_metadata,
+                   get_unique_metadata, split_dicom, check_dicom_metadata,
                    invert_monochrome, mirror_right_to_left, rebuild_filename)
 
 
@@ -22,7 +23,6 @@ def load_config(path):
 ROOT = Path.cwd()
 
 config = load_config(ROOT / "configs/default.yaml")
-cfg = load_config(ROOT / "configs/mappings.yaml")['categories']
 
 # Get the info from config       
 paths = config["paths"]
@@ -108,28 +108,7 @@ def main():
     step2_df = df.copy()
 
 
-    # --- Bodypart ---
-    step2_df = categorize_column(
-        step2_df, 'bodypart_new', 'body_part_examined', cfg['bodypart'],
-        fallbacks=[('study_description',  cfg['study_description']),
-                   ('series_description', cfg['series_description_bodypart'])])
-    
-    step2_df['bodypart_new'] = step2_df['bodypart_new'].map({'foot': 'F', 'hand': 'H', 'other': 'O'})
-
-    # --- Laterality ---
-    step2_df = categorize_column(step2_df, 'laterality_new', 'laterality', 
-                               cfg['laterality'], fallbacks =[('view_position', cfg['view_position_laterality']),
-                                                              ('series_description',  cfg['series_description_laterality'])])
-
-    # --- View Position ---
-    step2_df = categorize_column(step2_df, 'view_position_new', 'view_position', 
-                               cfg['view_position_viewposition'], fallbacks = [('study_description', cfg['series_description_viewposition'])])
-
-    # --- Photometric ---
-    step2_df = categorize_column(step2_df, 'photometric_interpretation_new', 'photometric_interpretation', 
-                               cfg['photometric'])
-    
-    step2_df['photometric_interpretation_new'] = step2_df['photometric_interpretation_new'].map({'MOne': 'MOne', 'MTwo': 'MTwo', 'MOther': 'MOther'})
+    step2_df = pp.categorize.add_InfosViaRegEx(step2_df)
 
     logger.info("Finished columns categorizarion")
 
