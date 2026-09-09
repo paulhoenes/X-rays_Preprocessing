@@ -15,6 +15,10 @@ import yaml
 
 RULES = Path(__file__).parent / "config" / "rules.yaml"
 
+# Free text fields, most reliable first. The series description names the
+# single image, the study description only the whole visit.
+TEXT_FIELDS = ("series_description", "study_description")
+
 
 def load_rules(path=None) -> dict:
     """Load the rule set (default: the bundled config/rules.yaml)."""
@@ -75,10 +79,9 @@ def categorize(df: pd.DataFrame, rules: dict, log=None) -> pd.DataFrame:
     # BodyPartExamined is often a station default: in this cohort foot, knee
     # and cervical spine images carry HAND. The description names the single
     # image and is closer to the truth.
-    from_tag = _first_match(tag["body_part_examined"], rules["bodypart"])
-    from_text = _coalesce(
-        _first_match(text["study_description"], rules["study_description_bodypart"]),
-        _first_match(text["series_description"], rules["series_description_bodypart"]))
+    from_tag = _first_match(tag["body_part_examined"], rules["bodypart"]["tag"])
+    from_text = _coalesce(*(_first_match(text[f], rules["bodypart"]["text"])
+                            for f in TEXT_FIELDS))
     conflicts = int((from_tag.notna() & from_text.notna()
                      & (from_tag.fillna("") != from_text.fillna(""))).sum())
     df["bodypart_new"] = (_coalesce(from_text, from_tag)
