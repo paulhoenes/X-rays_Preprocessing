@@ -1,24 +1,28 @@
-"""Everything that touches the pixel data."""
+"""Everything that touches the pixel data: steps 3b and 4.
+
+The counterpart to header.py, which never reads a pixel. Every change happens
+on a copy in memory -- the source file is never written to, and the source
+folder may be mounted read-only.
+"""
 from __future__ import annotations
 
 import os
+from collections import defaultdict
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pydicom
 
+from .rules import rebuild_filename
+
 
 def check_dicom_metadata(ds, row):
-    """
-    Standardizes tags for the training dataset.
-    """
+    """Write the derived categories back into the header."""
     ds.BodyPartExamined = row["bodypart_new"]
     ds.ViewPosition = row["view_position_new"]
     ds.Laterality = row["laterality_new"]
-    
-    # Store the filename inside the DICOM for easy viewing later
-    ds.ReferringPhysicianName = row['filename_new_dupl']
-
+    ds.ReferringPhysicianName = row["filename_new_dupl"]
     return ds
 
 
@@ -50,42 +54,21 @@ def mirror_right_to_left(ds):
 
 
 def split_dicom(src_path, row, side):
-    """
-    Reads a DICOM, crops it to the Left or Right half, 
-    updates metadata, and saves to the destination.
-    """
-    
-    # Work from a local copy so the caller's row is never mutated (Bug 4 fix)
-    row = row.copy()
-    ds = pydicom.dcmread(src_path)
+    """Crop a bilateral image down to one half.
 
-    # fix invertion
-    if row['photometric_interpretation_new'] == 'MOne':
+    The right half is mirrored afterwards, so it lies like a left hand.
+    """
+    ds = _decompress(pydicom.dcmread(src_path))
+    if row["photometric_interpretation_new"] == "MOne":
         ds = invert_monochrome(ds)
-        row['photometric_interpretation_new'] = 'MTwo'        
 
-    pixel_data = ds.pixel_array
-    _, width = pixel_data.shape
-    mid = width // 2
+    pixel = ds.pixel_array
+    middle = pixel.shape[1] // 2
+    half = pixel[:, middle:] if side == "R" else pixel[:, :middle]
 
-    cropped_pixels = pixel_data[:, mid:] if side == 'R' else pixel_data[:, :mid]
-        
-    # Update DICOM header metadata
-    ds.Rows, ds.Columns = cropped_pixels.shape
-    ds.PixelData = cropped_pixels.tobytes()
-    #ds.Laterality = side
-
-    # fix side
-    if side == 'R':
-        ds = mirror_right_to_left(ds)
-    
-    new_filename = (
-        f"{row['pat_id']}_{row['study_date']}_{row['bodypart_new']}_"
-        f"{side}_{row['view_position_new']}_{row['photometric_interpretation_new']}_"
-        f"{row['dup_suffix']}_split"
-    )
-    
-    return ds, new_filename
+    ds.Rows, ds.Columns = half.shape
+    ds.PixelData = half.tobytes()
+    return mirror_right_to_left(ds) if side == "R" else ds
 
 
 def _decompress(ds):
@@ -205,3 +188,97 @@ def detect_bilateral(sel, rules, log) -> pd.DataFrame:
         sel.loc[hits, "filename_new_dupl"] = (
             sel.loc[hits].apply(rebuild_filename, axis=1))
     return sel
+
+
+def write_processed(sel, output_dicoms, log, overwrite=False) -> pd.DataFrame:
+    """Standardize the pixels and store them flat under a telling name.
+
+    MONOCHROME1 is inverted, right hands are mirrored, bilateral images are
+    split in the middle. The source is read, the in-memory copy is changed --
+    the source file is never touched.
+
+    The run is idempotent: existing target files are skipped without reading
+    the pixels at all.
+    """
+    output_dicoms = Path(output_dicoms)
+    output_dicoms.mkdir(parents=True, exist_ok=True)
+
+    # Bilateral images last: for them only the sides are produced that are not
+    # already there from a single image.
+    single = sel[sel["laterality_new"].isin(["L", "R"])]
+    bilateral = sel[sel["laterality_new"] == "B"]
+    rest = sel[~sel["laterality_new"].isin(["L", "R", "B"])]
+    ordered = pd.concat([single, bilateral, rest])
+
+    done: defaultdict[tuple, set] = defaultdict(set)
+    rows, written, skipped, errors = [], 0, 0, 0
+
+    def store(row, dest, load_pixels):
+        """Record the row and write it -- ``load_pixels`` only if needed."""
+        nonlocal written, skipped
+        row["filename_written"] = dest.name
+        rows.append(row)
+        if dest.exists() and not overwrite:
+            skipped += 1
+            return
+        check_dicom_metadata(load_pixels(), row).save_as(str(dest))
+        written += 1
+
+    for n, (_, row) in enumerate(ordered.iterrows(), 1):
+        src = Path(row["filepathname_old"])
+        if not src.exists():
+            log.warning(f"not found, skipped: {src}")
+            errors += 1
+            continue
+
+        try:
+            if row["laterality_new"] == "B":
+                key = (row["pat_id"], row["study_date"])
+                missing = {"L", "R"} - done[key]
+                for side in sorted(missing):
+                    new_row = row.copy()
+                    new_row["laterality_new"] = side
+                    new_row["IsMirrored"] = (side == "R")
+                    if new_row["photometric_interpretation_new"] == "MOne":
+                        new_row["photometric_interpretation_new"] = "MTwo"
+                    new_row["filename_new_dupl"] = f"{rebuild_filename(new_row)}_split"
+                    store(new_row,
+                          output_dicoms / f"{new_row['filename_new_dupl']}.dcm",
+                          lambda s=side: split_dicom(src, row, s))
+                    done[key].add(side)
+            else:
+                row = row.copy()
+                row["IsMirrored"] = (row["laterality_new"] == "R")
+                # Determine the target name up front: MONOCHROME1 becomes MTwo,
+                # and that is part of the file name. Only this way can an
+                # existing result be recognized without reading the pixels.
+                if row["photometric_interpretation_new"] == "MOne":
+                    row["photometric_interpretation_new"] = "MTwo"
+                    row["filename_new_dupl"] = rebuild_filename(row)
+                    invert = True
+                else:
+                    invert = False
+                dest = output_dicoms / f"{row['filename_new_dupl']}.dcm"
+
+                def load_pixels(src=src, invert=invert,
+                                mirror=row["IsMirrored"]):
+                    ds = _decompress(pydicom.dcmread(src))
+                    if invert:
+                        ds = invert_monochrome(ds)
+                    return mirror_right_to_left(ds) if mirror else ds
+
+                store(row, dest, load_pixels)
+                if row["laterality_new"] in ("L", "R"):
+                    done[(row["pat_id"], row["study_date"])].add(
+                        row["laterality_new"])
+
+        except Exception as e:      # one broken file must not end the run
+            log.warning(f"error on {src.name}: {type(e).__name__}: {e}")
+            errors += 1
+
+        if n % 200 == 0:
+            log.info(f"  {n}/{len(ordered)} processed")
+
+    log.info(f"written {written}, skipped {skipped} "
+             f"(already there), errors {errors}")
+    return pd.DataFrame(rows)

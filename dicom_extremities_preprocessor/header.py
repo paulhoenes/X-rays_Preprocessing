@@ -1,4 +1,5 @@
 """Reading DICOM headers -- without the pixel data."""
+import os
 from typing import Dict
 
 import numpy as np
