@@ -19,13 +19,17 @@ here is only the order in which it happens and what gets recorded.
 from __future__ import annotations
 
 import datetime
+import json
+import sys
 from pathlib import Path
 
 import pandas as pd
+import pydicom
 
+from . import __version__
 from .header import scan_metadata
 from .pixels import detect_bilateral, write_processed
-from .rules import categorize, load_rules, select
+from .rules import RULES, categorize, load_rules, select
 from .utils import get_unique_metadata, setup_logger
 
 
@@ -85,6 +89,7 @@ def run(input_dir, output_dir, rules=None, bodypart="H",
         dicoms/<view>/        the processed images, one folder per view
         csvs/                 the tables of every intermediate step
         csvs/pairs.csv        the pairing PA <-> oblique
+        provenance.json       what produced this data state
         pipeline_<time>.log   log of the run
     """
     input_dir, output_dir = Path(input_dir), Path(output_dir)
@@ -94,6 +99,7 @@ def run(input_dir, output_dir, rules=None, bodypart="H",
     csv_dir, dicom_dir = output_dir / "csvs", output_dir / "dicoms"
     csv_dir.mkdir(parents=True, exist_ok=True)
     log = setup_logger(str(output_dir))
+    start = datetime.datetime.now()
 
     log.info(f"source: {input_dir}")
     log.info(f"target: {output_dir}")
@@ -133,6 +139,29 @@ def run(input_dir, output_dir, rules=None, bodypart="H",
         log.info(f"{removed} images without a counterpart removed "
                  f"({len(incomplete)} incomplete cases)")
 
+    # What produced this data state? Without this file it cannot be
+    # reconstructed later.
     complete = int((pairs["status"] == "complete").sum()) if len(pairs) else 0
-    log.info(f"done -- {complete} complete cases in {dicom_dir}")
+    provenance = {
+        "created": start.isoformat(timespec="seconds"),
+        "duration_seconds": round((datetime.datetime.now() - start).total_seconds()),
+        "package_version": __version__,
+        "python": sys.version.split()[0],
+        "pydicom": pydicom.__version__,
+        "source": str(input_dir),
+        "rules": str(rules or RULES),
+        "selection": {"bodypart": bodypart, "views": list(views)},
+        "complete_pairs_only": bool(drop_unpaired),
+        "files_read": int(len(df)),
+        "files_selected": {v: int(len(d)) for v, d in selected_by_view.items()},
+        "files_written": {v: len(list((dicom_dir / v).glob("*.dcm")))
+                          for v in views},
+        "cases_total": int(len(pairs)),
+        "cases_complete": complete,
+        "in_container": Path("/.singularity.d").exists(),
+    }
+    (output_dir / "provenance.json").write_text(json.dumps(provenance, indent=2))
+
+    log.info(f"done in {provenance['duration_seconds']}s -- "
+             f"{complete} complete cases in {dicom_dir}")
     return dicom_dir
