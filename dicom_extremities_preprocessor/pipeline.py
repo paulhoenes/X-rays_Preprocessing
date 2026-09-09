@@ -12,8 +12,8 @@ import pydicom
 import yaml
 
 from .header import extract_metadata
-from .pixels import (check_dicom_metadata, invert_monochrome,
-                     mirror_right_to_left, split_dicom)
+from .pixels import (check_dicom_metadata, detect_bilateral,
+                     invert_monochrome, mirror_right_to_left, split_dicom)
 from .rules import categorize, load_rules, rebuild_filename, select
 from .utils import get_unique_metadata, setup_logger
 
@@ -115,6 +115,7 @@ def run(input_dir, output_dir, bodypart="H", view="dp"):
     # Keep only hands DP images, detect duplicates, and add a numeric suffix.
 
     step3_df = select(step2_df, logger, bodypart=bodypart, view=view)
+    step3_df = detect_bilateral(step3_df, load_rules(), logger)
 
     # Save updated file
     step3_df.to_csv(os.path.join(output_folder, "csvs/step3_metadata_df.csv"), index=False, errors='replace')

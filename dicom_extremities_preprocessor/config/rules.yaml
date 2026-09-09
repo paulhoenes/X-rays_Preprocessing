@@ -86,6 +86,16 @@ photometric:
   MTwo:
     - '^monochrome2$'
 
+# Two hands on one film are in no tag. Decided on the image instead:
+# pixels.shows_two_hands looks for two tissue blocks separated by a dark gap,
+# and only on landscape images.
+bilateral:
+  min_aspect_ratio: 1.0
+  min_gap: 0.04            # narrower gaps are spread fingers, not two hands
+  min_brightness: 0.35     # a pixel is tissue from this brightness
+  min_column_fill: 0.06    # a column is occupied from this share of tissue
+  min_block_width: 0.12    # a block is a hand from this share of the width
+
 # Upper extremity but NOT a whole hand -- wrist, forearm, a single finger.
 # They carry BodyPartExamined = HAND but show no joints that get scored.
 hand:
