@@ -34,7 +34,9 @@ def normalize_text(x) -> str:
     x = (x.replace("ß", "ss").replace("ä", "ae")
           .replace("ö", "oe").replace("ü", "ue"))
     x = re.sub(r"[.,;:]+", " ", x)
-    return re.sub(r"\s+", " ", x)
+    # strip again at the end: the punctuation above turns into spaces, and a
+    # trailing one would break the patterns anchored with ^...$
+    return re.sub(r"\s+", " ", x).strip()
 
 
 def _first_match(text: pd.Series, rules: dict) -> pd.Series:
