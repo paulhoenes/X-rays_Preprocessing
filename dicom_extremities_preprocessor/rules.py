@@ -119,6 +119,13 @@ def categorize(df: pd.DataFrame, rules: dict, log=None) -> pd.DataFrame:
     df["view_position_new"] = _coalesce(view_tag, view_text).where(
         ~is_hand, _coalesce(view_text, view_tag))
 
+    if rules["hand"]["lat_is_oblique"]:
+        as_oblique = is_hand & df["view_position_new"].eq("lat")
+        df.loc[as_oblique, "view_position_new"] = "oblique"
+        if as_oblique.any():
+            log.info(f"{int(as_oblique.sum())} hand images with 'lat'/'seitl.' "
+                     f"counted as oblique")
+
     disagree = int((is_hand & view_tag.notna() & view_text.notna()
                     & (view_tag.fillna("") != view_text.fillna(""))).sum())
     if disagree:

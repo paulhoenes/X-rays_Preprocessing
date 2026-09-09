@@ -89,6 +89,11 @@ photometric:
 # Upper extremity but NOT a whole hand -- wrist, forearm, a single finger.
 # They carry BodyPartExamined = HAND but show no joints that get scored.
 hand:
+  # In this cohort "lat"/"seitl."/"stl" on a HAND image is in fact the oblique
+  # view -- checked by eye on 800 images. For feet it is a real lateral view,
+  # so this only applies where the body part is H.
+  lat_is_oblique: true
+
   no_joint_image:
     - '\bhandgelenk\b'
     - '\bhandwurzel\b'
