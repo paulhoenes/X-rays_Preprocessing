@@ -1,8 +1,29 @@
-"""What gets decided: body part, side, view and photometry.
+"""Derive body part, side and view from the DICOM header.
 
-The matching and the text normalisation it runs against live here too --
-they exist for these rules and nothing else.
+All selection logic lives here. ``cli.py`` only parses arguments,
+``pipeline.py`` only runs the steps -- what is *decided* is decided in this
+file and in ``config/rules.yaml``.
+
+The basic problem: the headers are incomplete and partly plain wrong. Three
+findings from a tag inventory over the whole cohort (17,038 files):
+
+1. ``ViewPosition`` lies for hands. Zither/Norgaard images carry ``AP``, so
+   the tag claims PA. ``LLO``/``RLO`` never occur for hands, only for feet.
+2. ``BodyPartExamined`` is often a station default. Foot, knee and cervical
+   spine images carry ``HAND`` here.
+3. 27 % of the images have no ``ViewPosition`` tag at all.
+
+Hence the priority that ``categorize`` applies:
+
+    body part   free text beats tag
+    view        free text for hands, tag otherwise
+    side        tag first, then free text
+
+All text rules live in ``config/rules.yaml`` and run against
+``normalize_text``.
 """
+
+
 from __future__ import annotations
 
 import logging
@@ -10,6 +31,7 @@ import re
 import unicodedata
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import yaml
 
@@ -21,13 +43,21 @@ TEXT_FIELDS = ("series_description", "study_description")
 
 
 def load_rules(path=None) -> dict:
-    """Load the rule set (default: the bundled config/rules.yaml)."""
+    """Load the rule set (default: the bundled ``config/rules.yaml``)."""
     with open(path or RULES, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
+# ------------------------------------------------------------ Text normalization
+
 def normalize_text(x) -> str:
-    """Bring text into the form the patterns in rules.yaml run against."""
+    """Bring text into the form the patterns in rules.yaml run against.
+
+    Lower case, NFKC normalized, German umlauts spelled out (ae/oe/ue/ss),
+    punctuation turned into spaces, runs of whitespace collapsed. Missing
+    values become the empty string. Patterns therefore have to be written in
+    lower case and without umlauts.
+    """
     if pd.isna(x):
         return ""
     x = unicodedata.normalize("NFKC", str(x)).lower().strip()
@@ -43,7 +73,7 @@ def _first_match(text: pd.Series, rules: dict) -> pd.Series:
     """First label whose pattern matches -- NA otherwise.
 
     The label order in rules.yaml is the priority: "oblique" before "lat",
-    otherwise the pattern for ll already swallows the llo.
+    otherwise the pattern for ``ll`` already swallows the ``llo``.
     """
     result = pd.Series(pd.NA, index=text.index, dtype="object")
     for label, patterns in rules.items():
@@ -63,26 +93,29 @@ def _coalesce(*columns: pd.Series) -> pd.Series:
     return result
 
 
+# ------------------------------------------------------------------ Categorize
+
 def categorize(df: pd.DataFrame, rules: dict, log=None) -> pd.DataFrame:
     """Set body part, side, view, photometry and file name.
 
-    Each category is taken from its DICOM tag first and from the free text
-    fields only where the tag says nothing.
+    Adds the columns ``bodypart_new``, ``laterality_new``,
+    ``view_position_new``, ``photometric_interpretation_new`` and
+    ``filename_new``. Without ``log`` the messages stay quiet -- so the
+    function can also be called from a notebook.
     """
     log = log or logging.getLogger(__name__)
     df = df.copy()
-    tag = {c: df[c].map(normalize_text) for c in
-           ("body_part_examined", "laterality", "view_position",
-            "photometric_interpretation")}
-    text = {c: df[c].map(normalize_text) for c in
-            ("series_description", "study_description")}
+    norm = {field: df[field].map(normalize_text) if field in df
+                   else pd.Series("", index=df.index)
+            for field in TEXT_FIELDS}
 
     # --- body part: free text beats tag -----------------------------------
-    # BodyPartExamined is often a station default: in this cohort foot, knee
-    # and cervical spine images carry HAND. The description names the single
-    # image and is closer to the truth.
-    from_tag = _first_match(tag["body_part_examined"], rules["bodypart"]["tag"])
-    from_text = _coalesce(*(_first_match(text[f], rules["bodypart"]["text"])
+    # Reason: see module header (2). The series description names the single
+    # image and is closer to the truth than a tag the device copies from the
+    # examination protocol.
+    from_tag = _first_match(df["body_part_examined"].map(normalize_text),
+                            rules["bodypart"]["tag"])
+    from_text = _coalesce(*(_first_match(norm[f], rules["bodypart"]["text"])
                             for f in TEXT_FIELDS))
     conflicts = int((from_tag.notna() & from_text.notna()
                      & (from_tag.fillna("") != from_text.fillna(""))).sum())
@@ -93,41 +126,44 @@ def categorize(df: pd.DataFrame, rules: dict, log=None) -> pd.DataFrame:
                  f"contradicts the tag -- the free text wins")
 
     # --- drop hand images without finger joints ---------------------------
+    # Wrist, forearm, single fingers: they carry BodyPartExamined = HAND but
+    # do not show the joints that are meant to be scored.
     no_joint = "|".join(rules["hand"]["no_joint_image"])
     drop = (df["bodypart_new"].eq("H")
-            & pd.concat([text[f].str.contains(no_joint, regex=True, na=False)
+            & pd.concat([norm[f].str.contains(no_joint, regex=True, na=False)
                          for f in TEXT_FIELDS], axis=1).any(axis=1))
     df.loc[drop, "bodypart_new"] = "O"
     if drop.any():
         log.info(f"{int(drop.sum())} images without a whole hand "
                  f"(wrist/forearm/finger) taken out of the hand category")
 
-    # --- side -------------------------------------------------------------
+    # --- side: tag first --------------------------------------------------
+    # Laterality is reliable in this cohort; where it is missing, ViewPosition
+    # names the side as well (LL/RL/LLO/RLO), free text last.
     df["laterality_new"] = _coalesce(
-        _first_match(tag["laterality"], rules["laterality"]["tag"]),
-        _first_match(tag["view_position"], rules["laterality"]["view_tag"]),
-        _first_match(text["series_description"], rules["laterality"]["text"]),
-    )
+        _first_match(df["laterality"].map(normalize_text), rules["laterality"]["tag"]),
+        _first_match(df["view_position"].map(normalize_text), rules["laterality"]["view_tag"]),
+        _first_match(norm["series_description"], rules["laterality"]["text"]))
 
     # --- view: free text for hands, tag otherwise -------------------------
-    # ViewPosition lies for hands: LLO/RLO never occur, Zither images carry
-    # AP, and 27 % of the images have no such tag at all. Only the series
-    # description, explicitly not the study description: that one names the
-    # whole visit ("Hand dp Zitherstellung" = both views were taken) and would
-    # mark the dp images of such visits as oblique too.
-    view_tag = _first_match(tag["view_position"], rules["view"]["tag"])
-    view_text = _first_match(text["series_description"], rules["view"]["text"])
+    # Reason: see module header (1). Only the series description, explicitly
+    # not the study description: that one names the whole visit ("Hand dp
+    # Zitherstellung" = both views were taken) and would mark the dp images of
+    # such visits as oblique too.
+    view_tag = _first_match(df["view_position"].map(normalize_text), rules["view"]["tag"])
+    view_text = _first_match(norm["series_description"], rules["view"]["text"])
     is_hand = df["bodypart_new"].eq("H")
     df["view_position_new"] = _coalesce(view_tag, view_text).where(
         ~is_hand, _coalesce(view_text, view_tag))
 
     if rules["hand"]["lat_is_oblique"]:
+        # For hands "lat"/"seitl." is in fact the oblique view -- confirmed
+        # visually, see rules.yaml. For feet this does not hold.
         as_oblique = is_hand & df["view_position_new"].eq("lat")
         df.loc[as_oblique, "view_position_new"] = "oblique"
         if as_oblique.any():
             log.info(f"{int(as_oblique.sum())} hand images with 'lat'/'seitl.' "
                      f"counted as oblique")
-
     disagree = int((is_hand & view_tag.notna() & view_text.notna()
                     & (view_tag.fillna("") != view_text.fillna(""))).sum())
     if disagree:
@@ -136,7 +172,8 @@ def categorize(df: pd.DataFrame, rules: dict, log=None) -> pd.DataFrame:
 
     # --- photometry -------------------------------------------------------
     df["photometric_interpretation_new"] = _first_match(
-        tag["photometric_interpretation"], rules["photometric"])
+        df["photometric_interpretation"].map(normalize_text),
+        rules["photometric"]["tag"])
 
     cols = ["bodypart_new", "laterality_new", "view_position_new",
             "photometric_interpretation_new"]

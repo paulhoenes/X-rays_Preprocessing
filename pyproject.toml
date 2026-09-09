@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dicom-extremities-preprocessor"
-version = "0.1.0"
-description = "Preprocess extremity X-ray DICOMs (hands/feet): photometric standardization, left-right orientation normalization, and bilateral hand splitting."
+version = "0.3.0"
+description = "Preprocess extremity X-ray DICOMs (hands/feet): derive body part, side and view from the headers, standardize photometry and orientation, split bilateral images, pair PA with oblique."
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
@@ -14,16 +14,15 @@ dependencies = [
   "pandas>=1.3",
   "pyyaml>=6.0",
   "SimpleITK>=2.3",
-  "scikit-learn>=1.0",
 ]
-
-[project.scripts]
-dicom-extremities-preprocessor = "dicom_extremities_preprocessor.cli:main"
 
 [project.optional-dependencies]
 # only for visualize.py -- the preprocessing itself needs no matplotlib
 plot = ["matplotlib>=3.5"]
 dev = ["pytest>=7", "matplotlib>=3.5", "pre-commit>=3.5", "nbstripout>=0.9.1"]
+
+[project.scripts]
+dicom-extremities-preprocessor = "dicom_extremities_preprocessor.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

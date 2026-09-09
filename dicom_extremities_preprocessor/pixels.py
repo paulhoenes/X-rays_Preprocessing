@@ -1,12 +1,21 @@
 """Everything that touches the pixel data: steps 3b and 4.
 
-The counterpart to header.py, which never reads a pixel. Every change happens
-on a copy in memory -- the source file is never written to, and the source
-folder may be mounted read-only.
+The counterpart to ``header.py``, which never reads a pixel. Two things happen
+here that the header cannot answer:
+
+* whether two hands lie on one image -- no tag says so, so it is decided on the
+  image (``shows_two_hands``)
+* the standardisation itself -- MONOCHROME1 inverted, right hands mirrored,
+  bilateral images cut in half
+
+Every change happens on a copy in memory. The source file is never written to,
+and the source folder may be mounted read-only.
 """
+
+
+
 from __future__ import annotations
 
-import os
 from collections import defaultdict
 from pathlib import Path
 
@@ -17,58 +26,20 @@ import pydicom
 from .rules import rebuild_filename
 
 
-def check_dicom_metadata(ds, row):
-    """Write the derived categories back into the header."""
-    ds.BodyPartExamined = row["bodypart_new"]
-    ds.ViewPosition = row["view_position_new"]
-    ds.Laterality = row["laterality_new"]
-    ds.ReferringPhysicianName = row["filename_new_dupl"]
-    return ds
-
+# ------------------------------------------------------------- Standardisation
 
 def invert_monochrome(ds):
-    """
-    Inverts the pixel array of a DICOM object to convert MONOCHROME1 to MONOCHROME2.
-    Does NOT save the file; returns the modified dataset object.
-    """
-    
-    pixel_array = ds.pixel_array
-    max_val = (2 ** ds.BitsStored) - 1
-    inverted_pixels = max_val - pixel_array
-    ds.PixelData = inverted_pixels.tobytes()
+    """MONOCHROME1 into MONOCHROME2 -- bone bright instead of dark."""
+    max_value = (2 ** ds.BitsStored) - 1
+    ds.PixelData = (max_value - ds.pixel_array).tobytes()
     ds.PhotometricInterpretation = "MONOCHROME2"
     return ds
 
 
 def mirror_right_to_left(ds):
-    """
-    Horizontally flips a DICOM image and updates metadata.
-    Use this for all Right hands (Train, Val, and Test) so they 
-    anatomically match the orientation of Left hands.
-    """
-
-    mirrored_pixels = np.flip(ds.pixel_array, axis=1)
-    ds.PixelData = mirrored_pixels.tobytes()
-    
+    """Mirror a right hand so that it lies like a left one."""
+    ds.PixelData = np.flip(ds.pixel_array, axis=1).tobytes()
     return ds
-
-
-def split_dicom(src_path, row, side):
-    """Crop a bilateral image down to one half.
-
-    The right half is mirrored afterwards, so it lies like a left hand.
-    """
-    ds = _decompress(pydicom.dcmread(src_path))
-    if row["photometric_interpretation_new"] == "MOne":
-        ds = invert_monochrome(ds)
-
-    pixel = ds.pixel_array
-    middle = pixel.shape[1] // 2
-    half = pixel[:, middle:] if side == "R" else pixel[:, :middle]
-
-    ds.Rows, ds.Columns = half.shape
-    ds.PixelData = half.tobytes()
-    return mirror_right_to_left(ds) if side == "R" else ds
 
 
 def _decompress(ds):
@@ -85,6 +56,8 @@ def _decompress(ds):
         pass
     return ds
 
+
+# ------------------------------------------------------------ Bilateral images
 
 def shows_two_hands(pixel, min_gap: float = 0.04, min_brightness: float = 0.35,
                     min_column_fill: float = 0.06,
@@ -188,6 +161,35 @@ def detect_bilateral(sel, rules, log) -> pd.DataFrame:
         sel.loc[hits, "filename_new_dupl"] = (
             sel.loc[hits].apply(rebuild_filename, axis=1))
     return sel
+
+
+def split_dicom(src_path, row, side):
+    """Crop a bilateral image down to one half.
+
+    The right half is mirrored afterwards, so it lies like a left hand.
+    """
+    ds = _decompress(pydicom.dcmread(src_path))
+    if row["photometric_interpretation_new"] == "MOne":
+        ds = invert_monochrome(ds)
+
+    pixel = ds.pixel_array
+    middle = pixel.shape[1] // 2
+    half = pixel[:, middle:] if side == "R" else pixel[:, :middle]
+
+    ds.Rows, ds.Columns = half.shape
+    ds.PixelData = half.tobytes()
+    return mirror_right_to_left(ds) if side == "R" else ds
+
+
+# --------------------------------------------------------------------- Writing
+
+def check_dicom_metadata(ds, row):
+    """Write the derived categories back into the header."""
+    ds.BodyPartExamined = row["bodypart_new"]
+    ds.ViewPosition = row["view_position_new"]
+    ds.Laterality = row["laterality_new"]
+    ds.ReferringPhysicianName = row["filename_new_dupl"]
+    return ds
 
 
 def write_processed(sel, output_dicoms, log, overwrite=False) -> pd.DataFrame:
