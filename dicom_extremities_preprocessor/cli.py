@@ -17,10 +17,17 @@ def main(argv=None):
                    help="folder with the raw data (searched recursively)")
     p.add_argument("--output", required=True, help="target folder")
     p.add_argument("--bodypart", default="H", help="H hand, F foot, O other")
-    p.add_argument("--view", default="dp", help="dp, oblique or lat")
+    p.add_argument("--views", default="dp,oblique",
+                   help="views, comma separated: dp, oblique, lat")
+    p.add_argument("--keep-unpaired", action="store_true",
+                   help="also keep cases where a view is missing")
+    p.add_argument("--overwrite", action="store_true",
+                   help="rewrite existing result files instead of skipping them")
     a = p.parse_args(argv)
 
-    run(a.input, a.output, bodypart=a.bodypart, view=a.view)
+    run(a.input, a.output, bodypart=a.bodypart,
+        views=tuple(v.strip() for v in a.views.split(",") if v.strip()),
+        overwrite=a.overwrite, drop_unpaired=not a.keep_unpaired)
 
 
 if __name__ == "__main__":

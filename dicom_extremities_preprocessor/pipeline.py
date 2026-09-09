@@ -1,131 +1,138 @@
-"""The processing steps: read headers, categorize, select, write.
+### The processing steps - 5 steps + pairing of the views
 
-What gets *decided* is decided in rules.py -- here is only the order.
 """
+    1. read the header of every file           header.scan_metadata
+    2. derive categories, build file names     rules.categorize
+    3. filter by body part / view              rules.select
+    3b. detect bilateral images on the image   pixels.detect_bilateral
+    4. standardize the pixels and store them   pixels.write_processed
+    5. pair PA and oblique into cases          build_pairs
+
+Step 3b is the only one that decides on the pixels instead of the header --
+because the header simply does not say whether two hands lie on the image.
+
+``scan`` stops after step 2: headers and categories, nothing written.
+
+What is *decided* is decided in ``rules.py`` and ``config/rules.yaml`` --
+here is only the order in which it happens and what gets recorded.
+"""
+from __future__ import annotations
+
 import datetime
-import os
 from pathlib import Path
 
 import pandas as pd
-import yaml
 
-from .header import extract_metadata
+from .header import scan_metadata
 from .pixels import detect_bilateral, write_processed
-from .rules import categorize, load_rules, rebuild_filename, select
+from .rules import categorize, load_rules, select
 from .utils import get_unique_metadata, setup_logger
 
-CONFIG = Path(__file__).parent / "config" / "rules.yaml"
+
+def build_pairs(dfs_by_view: dict, log) -> pd.DataFrame:
+    """Bring PA and oblique together into cases.
+
+    For the multi-view work the unit is not the single image but the *case*:
+    one hand at one visit, in both views. The pairing key is therefore
+    (pat_id, study_date, side).
+
+    Pairing happens AFTER writing, not before: bilateral images are split into
+    L and R only while writing, before that their side is not a real side yet.
+
+    Result: one row per case, one column per view holding the written file name
+    (empty if the view is missing), plus ``status``.
+    """
+    key = ["pat_id", "study_date", "laterality_new"]
+    rows = None
+    for view, df in dfs_by_view.items():
+        if df.empty:
+            continue
+        # One hand can have several images of the same view at one visit
+        # (repeats, duplicates). Deterministically take the first.
+        part = (df.sort_values("filename_written")
+                  .groupby(key, as_index=False)
+                  .first()[key + ["filename_written"]]
+                  .rename(columns={"filename_written": f"file_{view}"}))
+        rows = part if rows is None else rows.merge(part, on=key, how="outer")
+    if rows is None:
+        return pd.DataFrame(columns=key + ["status"])
+
+    cols = [f"file_{v}" for v in dfs_by_view]
+    for c in cols:
+        if c not in rows:
+            rows[c] = pd.NA
+    complete = rows[cols].notna().all(axis=1)
+    rows["status"] = complete.map({True: "complete", False: "incomplete"})
+
+    log.info(f"pairing: {int(complete.sum())} complete of "
+             f"{len(rows)} (pat_id, study_date, side) cases")
+    for c in cols:
+        log.info(f"  {c}: {int(rows[c].notna().sum())} present")
+    return rows.sort_values(key).reset_index(drop=True)
 
 
-def load_config(path):
-    with open(path, "r") as f:
-        return yaml.safe_load(f)
+def run(input_dir, output_dir, rules=None, bodypart="H",
+        views=("dp", "oblique"), overwrite=False, drop_unpaired=True) -> Path:
+    """The complete preprocessing. Returns the folder with the DICOMs.
 
+    Both views are produced in ONE run and in separate folders -- the landmark
+    models are view specific. Cases with a missing view are removed by default,
+    so that the plain PA baseline and the fusion model train on the same cases;
+    otherwise the comparison would be unfair.
 
-def run(input_dir, output_dir, bodypart="H", view="dp", overwrite=False):
-    """Read input_dir, write the processed DICOMs and tables below output_dir."""
+    Creates below ``output_dir``::
+
+        dicoms/<view>/        the processed images, one folder per view
+        csvs/                 the tables of every intermediate step
+        csvs/pairs.csv        the pairing PA <-> oblique
+        pipeline_<time>.log   log of the run
+    """
     input_dir, output_dir = Path(input_dir), Path(output_dir)
-    tags = load_config(CONFIG)["tags"]
+    if not input_dir.is_dir():
+        raise SystemExit(f"source folder not found: {input_dir}")
 
-    output_folder = output_dir
-    data_folder = input_dir
-    processed_dir = output_dir / "dicoms"
+    csv_dir, dicom_dir = output_dir / "csvs", output_dir / "dicoms"
+    csv_dir.mkdir(parents=True, exist_ok=True)
+    log = setup_logger(str(output_dir))
 
-    logger = setup_logger(output_dir)
-    logger.info(f"Process started: {datetime.datetime.now()}......")
+    log.info(f"source: {input_dir}")
+    log.info(f"target: {output_dir}")
+    cfg = load_rules(rules)
 
-    ###########################
-    ##         Step 1        ##
-    ###########################
-    # Read all DICOM files and extract metadata tags.
-    # Create a list of unique metadata values for future category mappings.
+    df = scan_metadata(input_dir, cfg["tags"], log)
+    df.to_csv(csv_dir / "step1_metadata_df.csv", index=False)
+    get_unique_metadata(df, ["filename_old", "filepathname_old", "columns",
+                             "rows", "pat_id", "study_date"]
+                        ).to_csv(csv_dir / "step1_unique_values.csv", index=False)
 
-    logger.info("Starting DICOM file extraction.......")
+    df2 = categorize(df, cfg, log)
+    df2.to_csv(csv_dir / "step2_categories.csv", index=False)
 
-    # Gather files
+    selected_by_view, written_by_view = {}, {}
+    for v in views:
+        sel = select(df2, log, bodypart=bodypart, view=v)
+        sel = detect_bilateral(sel, cfg, log)
+        sel.to_csv(csv_dir / f"step3_selected_{v}.csv", index=False)
+        written = write_processed(sel, dicom_dir / v, log, overwrite=overwrite)
+        written.to_csv(csv_dir / f"step4_written_{v}.csv", index=False)
+        selected_by_view[v], written_by_view[v] = sel, written
 
+    pairs = build_pairs(written_by_view, log)
+    pairs.to_csv(csv_dir / "pairs.csv", index=False)
 
-    all_files = [os.path.join(dp, f) 
-                 for dp, _, filenames in os.walk(data_folder) 
-                 for f in filenames if not f.startswith('.')]
-    
-    
-    logger.info(f"Processing {len(all_files)} files")
-    
-    results = [meta for f in all_files if (meta := extract_metadata(f, tags))]
-    
-    df = pd.DataFrame(results)
+    removed = 0
+    if drop_unpaired and len(pairs):
+        incomplete = pairs[pairs["status"] != "complete"]
+        for _, row in incomplete.iterrows():
+            for v in views:
+                name = row.get(f"file_{v}")
+                dest = dicom_dir / v / name if isinstance(name, str) else None
+                if dest is not None and dest.exists():
+                    dest.unlink()
+                    removed += 1
+        log.info(f"{removed} images without a counterpart removed "
+                 f"({len(incomplete)} incomplete cases)")
 
-
-
-    n_unique = df["filename_old"].nunique()
-    n_nonnull = df["filename_old"].notna().sum()
-    if n_unique == n_nonnull:
-        logger.info(f"Created df of shape {df.shape}; all files are unique")
-    else:
-        logger.info(f"Created df of shape {df.shape}; not all files are unique")
-
-
-    # Save metadata
-    os.makedirs(os.path.join(output_folder, "csvs"), exist_ok=True)
-    df.to_csv(os.path.join(output_folder, "csvs/step1_metadata_df.csv"), index=False, errors='replace')
-    logger.info("Saved step 1 metadata df")
-
-    # Calculate unique combinatinations pat_id & study_date
-
-    im_per_iddate = (df.groupby(['pat_id', 'study_date'])
-                       .size()
-                       .reset_index()
-                       .rename(columns={0: 'count'}))
-    im_per_iddate.to_csv(os.path.join(output_folder, "csvs/step1_im_per_iddate.csv"), index=False, errors='replace')
-    logger.info("Saved df with unique patient visits and days")
-
-    exclude = ["filepath_old", "filename_old", "filepathname_old", 
-            "columns", "rows", "pat_id", "study_date"]
-
-    pat_dict_unique_df = get_unique_metadata(df, exclude)
-
-    # Save unique metadata
-    pat_dict_unique_df.to_csv(os.path.join(output_folder, "csvs/step1_metadata_unique_df.csv"), index=False, errors='replace')
-
-    logger.info(f"Saved df with unique metadata. Step 1 done! Time: {datetime.datetime.now()}")
-
-    ###########################
-    ##         Step 2        ##
-    ###########################
-    # Use metadata fields to standardise body part, laterality, view position,
-    # and photometric interpretation. Generate new filenames.
-
-    # 1. Categorization
-    step2_df = df.copy()
-
-
-    step2_df = categorize(step2_df, load_rules(), logger)
-
-    step2_df.to_csv(os.path.join(output_folder, "csvs/step2_metadata_df.csv"), index=False, errors='replace')
-    logger.info(f"Finished new filename creation. Step 2 done! Time: {datetime.datetime.now()}")
-    
-      
-    ###########################
-    ##         Step 3        ##
-    ###########################
-    # Keep only hands DP images, detect duplicates, and add a numeric suffix.
-
-    step3_df = select(step2_df, logger, bodypart=bodypart, view=view)
-    step3_df = detect_bilateral(step3_df, load_rules(), logger)
-
-    # Save updated file
-    step3_df.to_csv(os.path.join(output_folder, "csvs/step3_metadata_df.csv"), index=False, errors='replace')
-
-    logger.info(f"Saved step 3 df ({len(step3_df)} rows). Step 3 done! Time: {datetime.datetime.now()}")
-
-    ###########################
-    ##         Step 4        ##
-    ###########################
-    # Standardise the pixels and write them out.
-
-    written = write_processed(step3_df, processed_dir, logger, overwrite=overwrite)
-    written.to_csv(os.path.join(output_folder, "csvs/step4_written.csv"),
-                   index=False, errors="replace")
-    logger.info(f"Step 4 done!; Time: {datetime.datetime.now()}")
-    return processed_dir
+    complete = int((pairs["status"] == "complete").sum()) if len(pairs) else 0
+    log.info(f"done -- {complete} complete cases in {dicom_dir}")
+    return dicom_dir
