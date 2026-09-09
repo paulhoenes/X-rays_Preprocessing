@@ -71,12 +71,21 @@ def categorize(df: pd.DataFrame, rules: dict, log=None) -> pd.DataFrame:
     text = {c: df[c].map(normalize_text) for c in
             ("series_description", "study_description")}
 
-    # --- body part --------------------------------------------------------
-    df["bodypart_new"] = _coalesce(
-        _first_match(tag["body_part_examined"], rules["bodypart"]),
+    # --- body part: free text beats tag -----------------------------------
+    # BodyPartExamined is often a station default: in this cohort foot, knee
+    # and cervical spine images carry HAND. The description names the single
+    # image and is closer to the truth.
+    from_tag = _first_match(tag["body_part_examined"], rules["bodypart"])
+    from_text = _coalesce(
         _first_match(text["study_description"], rules["study_description_bodypart"]),
-        _first_match(text["series_description"], rules["series_description_bodypart"]),
-    ).map({"foot": "F", "hand": "H", "other": "O"})
+        _first_match(text["series_description"], rules["series_description_bodypart"]))
+    conflicts = int((from_tag.notna() & from_text.notna()
+                     & (from_tag.fillna("") != from_text.fillna(""))).sum())
+    df["bodypart_new"] = (_coalesce(from_text, from_tag)
+                          .map({"foot": "F", "hand": "H", "other": "O"}))
+    if conflicts:
+        log.info(f"body part: {conflicts} images where the free text "
+                 f"contradicts the tag -- the free text wins")
 
     # --- side -------------------------------------------------------------
     df["laterality_new"] = _coalesce(
