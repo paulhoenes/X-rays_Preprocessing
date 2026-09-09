@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
-from . import header, pixels, rules, utils, visualize
+from . import header, pipeline, pixels, rules, utils, visualize
+from .pipeline import run
 
 __version__ = "0.1.0"
