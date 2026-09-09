@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -73,6 +74,29 @@ def build_pairs(dfs_by_view: dict, log) -> pd.DataFrame:
     for c in cols:
         log.info(f"  {c}: {int(rows[c].notna().sum())} present")
     return rows.sort_values(key).reset_index(drop=True)
+
+
+def scan(input_dir, rules=None, log=None) -> pd.DataFrame:
+    """Steps 1 and 2 only: read the headers, derive the categories.
+
+    Touches no pixel and writes no file -- for looking at a data set before
+    deciding to process it, and for counting how the rules fall out on a new
+    cohort. The result is the same table ``run`` writes as
+    ``csvs/step2_categories.csv``.
+
+        df = scan("/path/rawdata")
+        df.groupby(["bodypart_new", "view_position_new"]).size()
+
+    ``get_unique_metadata`` on the same table shows what the free text fields
+    contain -- the basis for new patterns in ``rules.yaml``.
+    """
+    log = log or logging.getLogger(__name__)
+    input_dir = Path(input_dir)
+    if not input_dir.is_dir():
+        raise SystemExit(f"source folder not found: {input_dir}")
+
+    cfg = load_rules(rules)
+    return categorize(scan_metadata(input_dir, cfg["tags"], log), cfg, log)
 
 
 def run(input_dir, output_dir, rules=None, bodypart="H",
