@@ -1,6 +1,6 @@
 # run python -W ignore::FutureWarning src/step1.py
 
-from utils import (setup_logger, extract_metadata, get_unique_metadata,
+from dicom_extremities_preprocessor.utils import (setup_logger, extract_metadata, get_unique_metadata,
                    categorize_column, split_dicom, check_dicom_metadata,
                    invert_monochrome, mirror_right_to_left, rebuild_filename)
 

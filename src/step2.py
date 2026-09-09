@@ -1,6 +1,6 @@
 # run python -W ignore::FutureWarning src/step2.py
 
-from utils import setup_logger
+from dicom_extremities_preprocessor.utils import setup_logger
  
 import datetime
 import pandas as pd
