@@ -29,8 +29,6 @@ def normalize_text(x) -> str:
     x = unicodedata.normalize("NFKC", str(x)).lower().strip()
     x = (x.replace("ß", "ss").replace("ä", "ae")
           .replace("ö", "oe").replace("ü", "ue"))
-    x = x.replace("fu?", "fuss").replace("vorfu?", "vorfuss")
-    x = x.replace("schr?g", "schraeg").replace("extremit?ten", "extremitaeten")
     x = re.sub(r"[.,;:]+", " ", x)
     return re.sub(r"\s+", " ", x)
 
