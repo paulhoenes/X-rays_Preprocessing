@@ -3,7 +3,7 @@
 The matching and the text normalisation it runs against live here too --
 they exist for these rules and nothing else.
 """
-import importlib.resources
+import pathlib
 import re
 import unicodedata
 
@@ -12,8 +12,9 @@ import pandas as pd
 import yaml
 
 
-with importlib.resources.open_text("dicom_extremities_preprocessor.resources",
-                                   "mappings_regex.yaml", encoding="utf-8") as f:
+RULES = pathlib.Path(__file__).parent / "config" / "rules.yaml"
+
+with open(RULES, encoding="utf-8") as f:
     cfg = yaml.safe_load(f)["categories"]
 
 

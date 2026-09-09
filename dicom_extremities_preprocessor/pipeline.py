@@ -17,7 +17,7 @@ from .pixels import (check_dicom_metadata, invert_monochrome,
                      mirror_right_to_left, split_dicom)
 from .utils import get_unique_metadata, rebuild_filename, setup_logger
 
-CONFIG = Path(__file__).parent / "resources" / "default.yaml"
+CONFIG = Path(__file__).parent / "config" / "rules.yaml"
 
 
 def load_config(path):

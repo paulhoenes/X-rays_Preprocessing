@@ -31,4 +31,4 @@ where = ["."]
 include = ["dicom_extremities_preprocessor*"]
 
 [tool.setuptools.package-data]
-dicom_extremities_preprocessor = ["resources/*.yaml"]
+dicom_extremities_preprocessor = ["config/*.yaml"]
