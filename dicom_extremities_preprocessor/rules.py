@@ -107,11 +107,23 @@ def categorize(df: pd.DataFrame, rules: dict, log=None) -> pd.DataFrame:
         _first_match(text["series_description"], rules["laterality"]["text"]),
     )
 
-    # --- view -------------------------------------------------------------
-    df["view_position_new"] = _coalesce(
-        _first_match(tag["view_position"], rules["view"]["tag"]),
-        _first_match(text["series_description"], rules["view"]["text"]),
-    )
+    # --- view: free text for hands, tag otherwise -------------------------
+    # ViewPosition lies for hands: LLO/RLO never occur, Zither images carry
+    # AP, and 27 % of the images have no such tag at all. Only the series
+    # description, explicitly not the study description: that one names the
+    # whole visit ("Hand dp Zitherstellung" = both views were taken) and would
+    # mark the dp images of such visits as oblique too.
+    view_tag = _first_match(tag["view_position"], rules["view"]["tag"])
+    view_text = _first_match(text["series_description"], rules["view"]["text"])
+    is_hand = df["bodypart_new"].eq("H")
+    df["view_position_new"] = _coalesce(view_tag, view_text).where(
+        ~is_hand, _coalesce(view_text, view_tag))
+
+    disagree = int((is_hand & view_tag.notna() & view_text.notna()
+                    & (view_tag.fillna("") != view_text.fillna(""))).sum())
+    if disagree:
+        log.info(f"view: {disagree} hand images where ViewPosition "
+                 f"contradicts the free text -- the free text wins")
 
     # --- photometry -------------------------------------------------------
     df["photometric_interpretation_new"] = _first_match(
