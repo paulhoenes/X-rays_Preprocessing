@@ -42,70 +42,49 @@ bodypart:
       - '\b(?:hand|handgelenk|handwurzel|finger|daumen)\b'
       - '\b(?:unterarm|ellenbogen|ellbogen)\b'
 
+# TAG: Laterality. The tag is reliable here; where it is missing, ViewPosition
+# names the side as well (LL/RL/LLO/RLO), the free text comes last.
 laterality:
-  R:
-    - '^r$'
-  L:
-    - '^l$'
+  tag:
+    R: ['^r$']
+    L: ['^l$']
+  view_tag:
+    R: ['^(?:rl|rlo)$']
+    L: ['^(?:ll|llo)$']
+  text:
+    B:
+      - '(?<!\w)vgl(?!\w)'
+      - '(?<!\w)bds(?!\w)'
+    R:
+      - '\brechts\b'
+      - '(?<!\w)re(?!\w)'
+      - '(?<!\w)r(?!\w)'
+    L:
+      - '\blinks\b'
+      - '(?<!\w)li(?!\w)'
+      - '(?<!\w)l(?!\w)'
 
-## Note that the order is important for the regex patterns when used with 
-#  pp.utils.categorize_column_regex. 
-# Basically: 'oblique' if 'llo|rlo'; elif 'll'  -> 'lat', ...  
-
-view_position_viewposition:
-  oblique:
-    - '^(?:llo|rlo)$'
-  lat:
-    - '^(?:ll|rl)$'
-  dp:
-    - '^(?:pa|ap)$'
-
-view_position_laterality:
-  R:
-    - '^(?:rl|rlo)$'
-  L:
-    - '^(?:ll|llo)$'
-
-series_description_laterality:
-  B:
-    - '(?<!\w)vgl(?!\w)'
-    - '(?<!\w)bds(?!\w)'
-
-  R:
-    - '\brechts\b'
-    - '(?<!\w)re(?!\w)'
-    - '(?<!\w)r(?!\w)'
-
-  L:
-    - '\blinks\b'
-    - '(?<!\w)li(?!\w)'
-    - '(?<!\w)l(?!\w)'
+# TAG: ViewPosition. Label order is the priority -- oblique before lat,
+# otherwise the pattern for ll already swallows the llo.
+view:
+  tag:
+    oblique: ['^(?:llo|rlo)$']
+    lat:     ['^(?:ll|rl)$']
+    dp:      ['^(?:pa|ap)$']
+  text:
+    oblique:
+      - '\b(?:schraeg|zither|zitherstellung|norgaard)\b'
+    lat:
+      - '\b(?:lat|seitl|seitlich|stl)\b'
+    dp:
+      - '\b(?:dp|dv|ap|pa)\b'
+      - '\b(?:a\s*p|d\s*p)\b'
 
 photometric:
   MOne:
     - '^monochrome1$'
   MTwo:
     - '^monochrome2$'
-
-series_description_viewposition:
-  oblique:
-    - '\bschraeg\b'
-    - '\bzither\b'
-    - '\bzitherstellung\b'
-
-  lat:
-    - '\blat\b'
-    - '\bseitl\b'
-    - '\bseitlich\b'
-    - '\bstl\b'
-
-  dp:
-    - '\bdp\b'
-    - '\bdv\b'
-    - '\bap\b'
-    - '\bpa\b'
-    - '\ba\s*p\b'
-    - '\bd\s*p\b'
 
 # Upper extremity but NOT a whole hand -- wrist, forearm, a single finger.
 # They carry BodyPartExamined = HAND but show no joints that get scored.

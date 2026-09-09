@@ -102,15 +102,15 @@ def categorize(df: pd.DataFrame, rules: dict, log=None) -> pd.DataFrame:
 
     # --- side -------------------------------------------------------------
     df["laterality_new"] = _coalesce(
-        _first_match(tag["laterality"], rules["laterality"]),
-        _first_match(tag["view_position"], rules["view_position_laterality"]),
-        _first_match(text["series_description"], rules["series_description_laterality"]),
+        _first_match(tag["laterality"], rules["laterality"]["tag"]),
+        _first_match(tag["view_position"], rules["laterality"]["view_tag"]),
+        _first_match(text["series_description"], rules["laterality"]["text"]),
     )
 
     # --- view -------------------------------------------------------------
     df["view_position_new"] = _coalesce(
-        _first_match(tag["view_position"], rules["view_position_viewposition"]),
-        _first_match(text["series_description"], rules["series_description_viewposition"]),
+        _first_match(tag["view_position"], rules["view"]["tag"]),
+        _first_match(text["series_description"], rules["view"]["text"]),
     )
 
     # --- photometry -------------------------------------------------------
