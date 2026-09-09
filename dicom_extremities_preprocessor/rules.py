@@ -151,6 +151,31 @@ def categorize(df: pd.DataFrame, rules: dict, log=None) -> pd.DataFrame:
     return df
 
 
+def select(df: pd.DataFrame, log=None, bodypart="H", view="dp") -> pd.DataFrame:
+    """Filter down to the subset of interest and number the duplicates.
+
+    Images without a recognized side drop out. They are unusable: pairing runs
+    over (pat_id, study_date, side), and the score table lists every joint
+    separately for left and right -- without a side there is neither a
+    counterpart nor a label. They used to be written out and paired with each
+    other under the side "NaN".
+    """
+    log = log or logging.getLogger(__name__)
+    sel = df[(df["bodypart_new"] == bodypart)
+             & (df["view_position_new"] == view)].copy()
+
+    has_side = sel["laterality_new"].isin(["L", "R", "B"])
+    if (~has_side).any():
+        log.info(f"  {int((~has_side).sum())} images without a recognized "
+                 f"side skipped")
+        sel = sel[has_side]
+
+    sel["dup_suffix"] = sel.groupby("filename_new").cumcount().astype(str)
+    sel["filename_new_dupl"] = sel["filename_new"] + "_" + sel["dup_suffix"]
+    log.info(f"selection {bodypart}/{view}: {len(sel)} of {len(df)} images")
+    return sel
+
+
 def rebuild_filename(row) -> str:
     """File name from the categories -- rebuild after every change to them."""
     return (f"{row['pat_id']}_{row['study_date']}_{row['bodypart_new']}_"

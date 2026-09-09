@@ -14,7 +14,7 @@ import yaml
 from .header import extract_metadata
 from .pixels import (check_dicom_metadata, invert_monochrome,
                      mirror_right_to_left, split_dicom)
-from .rules import categorize, load_rules, rebuild_filename
+from .rules import categorize, load_rules, rebuild_filename, select
 from .utils import get_unique_metadata, setup_logger
 
 CONFIG = Path(__file__).parent / "config" / "rules.yaml"
@@ -114,14 +114,7 @@ def run(input_dir, output_dir, bodypart="H", view="dp"):
     ###########################
     # Keep only hands DP images, detect duplicates, and add a numeric suffix.
 
-    # Hands dp selection
-    step3_df = step2_df[(step2_df['bodypart_new'] == bodypart) & (step2_df['view_position_new'] == view)].copy()
-   
-    logger.info(f"Selected only HANDS DP images. Current size of the dataset {len(step3_df)}")
-          
-    # Calculate duplicate counts (0 for unique, 1, 2, 3... for duplicates)
-    step3_df['dup_suffix'] = step3_df.groupby('filename_new').cumcount().astype(str)
-    step3_df['filename_new_dupl'] = step3_df['filename_new'] + "_" + step3_df["dup_suffix"]
+    step3_df = select(step2_df, logger, bodypart=bodypart, view=view)
 
     # Save updated file
     step3_df.to_csv(os.path.join(output_folder, "csvs/step3_metadata_df.csv"), index=False, errors='replace')
