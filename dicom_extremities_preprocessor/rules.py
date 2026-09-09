@@ -23,7 +23,7 @@ TEXT_FIELDS = ("series_description", "study_description")
 def load_rules(path=None) -> dict:
     """Load the rule set (default: the bundled config/rules.yaml)."""
     with open(path or RULES, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)["categories"]
+        return yaml.safe_load(f)
 
 
 def normalize_text(x) -> str:
@@ -89,6 +89,16 @@ def categorize(df: pd.DataFrame, rules: dict, log=None) -> pd.DataFrame:
     if conflicts:
         log.info(f"body part: {conflicts} images where the free text "
                  f"contradicts the tag -- the free text wins")
+
+    # --- drop hand images without finger joints ---------------------------
+    no_joint = "|".join(rules["hand"]["no_joint_image"])
+    drop = (df["bodypart_new"].eq("H")
+            & pd.concat([text[f].str.contains(no_joint, regex=True, na=False)
+                         for f in TEXT_FIELDS], axis=1).any(axis=1))
+    df.loc[drop, "bodypart_new"] = "O"
+    if drop.any():
+        log.info(f"{int(drop.sum())} images without a whole hand "
+                 f"(wrist/forearm/finger) taken out of the hand category")
 
     # --- side -------------------------------------------------------------
     df["laterality_new"] = _coalesce(

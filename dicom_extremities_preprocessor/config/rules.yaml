@@ -23,89 +23,100 @@ tags:
   photometric_interpretation: '0028|0004'
 
 
-categories:
-  bodypart:
-    tag:
-      foot:  ['\b(?:foot|ankle|low_exm)\b']
-      hand:  ['\b(?:hand|up_exm)\b']
-      other: ['\b(?:cspine|vertebral column|knee|neck|pelvis|elbow|abdomen|chest|hip|lspine|shoulder|skull|tspine)\b']
+bodypart:
+  tag:
+    foot:  ['\b(?:foot|ankle|low_exm)\b']
+    hand:  ['\b(?:hand|up_exm)\b']
+    other: ['\b(?:cspine|vertebral column|knee|neck|pelvis|elbow|abdomen|chest|hip|lspine|shoulder|skull|tspine)\b']
 
-    # One list for both description fields. They were two and contradicted each
-    # other: "finger" meant hand in the study list, other in the series list.
-    # Resolved the way commit fec056a decided it.
-    text:
-      other:
-        - '\b(?:hws|bws|lws|wirbelsaeule)\b'
-        - '\b(?:knie|becken|huefte|dexa|schulter|schaedel|thorax|abdomen)\b'
-        - '\b(?:finger|ellbogen)\b'
-      foot:
-        - '\b(?:fuss|vorfuss|fussgelenk|sprunggelenk|zeh|zehen)\b'
-        - '\b(?:fersenbein|sesambeine|vf sesambeine)\b'
-      hand:
-        - '\b(?:hand|handgelenk)\b'
-        - '\bunterarm\s*/\s*handgelenk\b'
+  # One list for both description fields. They were two and contradicted each
+  # other: "finger" meant hand in the study list, other in the series list.
+  text:
+    other:
+      - '\b(?:hws|bws|lws|wirbelsaeule|dens)\b'
+      - '\b(?:knie|becken|beckenuebersicht|huefte|dexa|schulter|schaedel|thorax|abdomen)\b'
+    foot:
+      - '\b(?:fuss|vorfuss|fussgelenk|sprunggelenk|zeh|zehen)\b'
+      - '\b(?:fersenbein|sesambeine|vf sesambeine)\b'
+    hand:
+      - '\b(?:hand|handgelenk|handwurzel|finger|daumen)\b'
+      - '\b(?:unterarm|ellenbogen|ellbogen)\b'
 
-  laterality:
-    R:
-      - '^r$'
-    L:
-      - '^l$'
+laterality:
+  R:
+    - '^r$'
+  L:
+    - '^l$'
 
 ## Note that the order is important for the regex patterns when used with 
 #  pp.utils.categorize_column_regex. 
 # Basically: 'oblique' if 'llo|rlo'; elif 'll'  -> 'lat', ...  
 
-  view_position_viewposition:
-    oblique:
-      - '^(?:llo|rlo)$'
-    lat:
-      - '^(?:ll|rl)$'
-    dp:
-      - '^(?:pa|ap)$'
+view_position_viewposition:
+  oblique:
+    - '^(?:llo|rlo)$'
+  lat:
+    - '^(?:ll|rl)$'
+  dp:
+    - '^(?:pa|ap)$'
 
-  view_position_laterality:
-    R:
-      - '^(?:rl|rlo)$'
-    L:
-      - '^(?:ll|llo)$'
+view_position_laterality:
+  R:
+    - '^(?:rl|rlo)$'
+  L:
+    - '^(?:ll|llo)$'
 
-  series_description_laterality:
-    B:
-      - '(?<!\w)vgl(?!\w)'
-      - '(?<!\w)bds(?!\w)'
+series_description_laterality:
+  B:
+    - '(?<!\w)vgl(?!\w)'
+    - '(?<!\w)bds(?!\w)'
 
-    R:
-      - '\brechts\b'
-      - '(?<!\w)re(?!\w)'
-      - '(?<!\w)r(?!\w)'
+  R:
+    - '\brechts\b'
+    - '(?<!\w)re(?!\w)'
+    - '(?<!\w)r(?!\w)'
 
-    L:
-      - '\blinks\b'
-      - '(?<!\w)li(?!\w)'
-      - '(?<!\w)l(?!\w)'
+  L:
+    - '\blinks\b'
+    - '(?<!\w)li(?!\w)'
+    - '(?<!\w)l(?!\w)'
 
-  photometric:
-    MOne:
-      - '^monochrome1$'
-    MTwo:
-      - '^monochrome2$'
+photometric:
+  MOne:
+    - '^monochrome1$'
+  MTwo:
+    - '^monochrome2$'
 
-  series_description_viewposition:
-    oblique:
-      - '\bschraeg\b'
-      - '\bzither\b'
-      - '\bzitherstellung\b'
+series_description_viewposition:
+  oblique:
+    - '\bschraeg\b'
+    - '\bzither\b'
+    - '\bzitherstellung\b'
 
-    lat:
-      - '\blat\b'
-      - '\bseitl\b'
-      - '\bseitlich\b'
-      - '\bstl\b'
+  lat:
+    - '\blat\b'
+    - '\bseitl\b'
+    - '\bseitlich\b'
+    - '\bstl\b'
 
-    dp:
-      - '\bdp\b'
-      - '\bdv\b'
-      - '\bap\b'
-      - '\bpa\b'
-      - '\ba\s*p\b'
-      - '\bd\s*p\b'
+  dp:
+    - '\bdp\b'
+    - '\bdv\b'
+    - '\bap\b'
+    - '\bpa\b'
+    - '\ba\s*p\b'
+    - '\bd\s*p\b'
+
+# Upper extremity but NOT a whole hand -- wrist, forearm, a single finger.
+# They carry BodyPartExamined = HAND but show no joints that get scored.
+hand:
+  no_joint_image:
+    - '\bhandgelenk\b'
+    - '\bhandwurzel\b'
+    - '\bunterarm\b'
+    - '\bellenbogen\b'
+    - '\bellbogen\b'
+    - '\bfinger\b'
+    - '\bdaumen\b'
+    - '\bskaphoid\b'
+    - '\bkahnbein\b'
