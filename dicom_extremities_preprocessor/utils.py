@@ -70,136 +70,14 @@ def get_unique_metadata(df, exclude_cols):
 
 ###### Step 2
 
-def categorize_column(df, target_col, primary_tag, mapping_dict, fallbacks=None):
-    """
-    Standardized logic: 
-    1. Check primary DICOM tag against a list.
-    2. If not found, check fallback columns (Series/Study Description).
-    """
-    # Initialize with NaN
-    df[target_col] = np.nan
-    
-    # Priority 1: Direct Mapping from Primary Tag
-    for label, keywords in mapping_dict.items():
-        mask = df[primary_tag].isin(keywords)
-        df.loc[mask, target_col] = label
-
-    # Priority 2: Fallback (only for rows still NaN)
-    if fallbacks:
-        for col, fallback_mapping in fallbacks:
-            if not df[target_col].isna().any():
-                break
-            for label, keywords in fallback_mapping.items():
-                mask = df[target_col].isna() & df[col].isin(keywords)
-                df.loc[mask, target_col] = label
-           
-    return df
-
-import numpy as np
-import pandas as pd
-import unicodedata
-import re
-
-def normalize_text(x):
-    if pd.isna(x):
-        return "" #np.nan
-
-    x = str(x)
-    x = unicodedata.normalize("NFKC", x)
-    x = x.lower().strip()
-
-    # Umlaute / deutsche Sonderzeichen
-    x = (
-        x.replace("ß", "ss")
-         .replace("ä", "ae")
-         .replace("ö", "oe")
-         .replace("ü", "ue")
-    )
-
-    # Häufige Encoding-Probleme in deinem Datensatz
-    x = x.replace("fu?", "fuss")
-    x = x.replace("vorfu?", "vorfuss")
-    x = x.replace("schr?g", "schraeg")
-    x = x.replace("extremit?ten", "extremitaeten")
-
-    # Interpunktion teilweise vereinheitlichen, aber / behalten
-    x = re.sub(r"[.,;:]+", " ", x)
-    x = re.sub(r"\s+", " ", x)
-
-    return x
-
-def categorize_column_regex(
-    df,
-    target_col,
-    primary_tag,
-    mapping_regex,
-    fallbacks=None,
-):
-    """
-    Kategorisierung mit Regex.
-    Die Reihenfolge der Labels im YAML bestimmt die Priorität.
-    """
-
-    #df[target_col] = np.nan
-    df[target_col] = pd.Series(pd.NA, index=df.index, dtype="object")
-
-    def apply_rules(source_col, rules, only_empty=True):
-        source_norm = df[source_col].map(normalize_text)
-
-        # Wichtig: Reihenfolge aus YAML wird übernommen
-        for label, patterns in rules.items():
-            pattern = "|".join(patterns)
-
-            match_mask = source_norm.str.contains(
-                pattern,
-                regex=True,
-                na=False
-            )
-
-            if only_empty:
-                match_mask = df[target_col].isna() & match_mask
-
-            df.loc[match_mask, target_col] = label
-
-    # Priority 1: primary DICOM tag
-    apply_rules(primary_tag, mapping_regex, only_empty=True)
-
-    # Priority 2: fallback columns, nur noch NaN-Zeilen
-    if fallbacks:
-        for col, fallback_mapping in fallbacks:
-            if not df[target_col].isna().any():
-                break
-
-            apply_rules(col, fallback_mapping, only_empty=True)
-
-    return df
 
 # Function for checking if both left & right hands are present on the same date
-def get_pair_status(row, pair_lookup):
-    # Only relevant for Hand DP
-    if row['bodypart_new'] != 'H' or row['view_position_new'] != 'dp':
-        return "N/A"
-    
-    key = (row['pat_id'], row['study_date'])
-    available_sides = pair_lookup.get(key, set())
-    
-    current = row['laterality_new']
-    
-    if current == 'B':
-        return "1"
 
-    other = 'R' if current == 'L' else 'L'
-    
-    return "1" if other in available_sides else f"Missing_{other}_Side"
 
     
 
 ###### Step 3
  
-
-
-
-
 
 
  
