@@ -11,11 +11,11 @@ import pandas as pd
 import pydicom
 import yaml
 
-from . import rules
 from .header import extract_metadata
 from .pixels import (check_dicom_metadata, invert_monochrome,
                      mirror_right_to_left, split_dicom)
-from .utils import get_unique_metadata, rebuild_filename, setup_logger
+from .rules import categorize, load_rules, rebuild_filename
+from .utils import get_unique_metadata, setup_logger
 
 CONFIG = Path(__file__).parent / "config" / "rules.yaml"
 
@@ -103,23 +103,8 @@ def run(input_dir, output_dir, bodypart="H", view="dp"):
     step2_df = df.copy()
 
 
-    step2_df = rules.add_InfosViaRegEx(step2_df)
+    step2_df = categorize(step2_df, load_rules(), logger)
 
-    logger.info("Finished columns categorizarion")
-
-    # 3. Filename Generation
-    # Fill NaNs with string 'NaN' for concatenation
-    cols_to_fix = ['bodypart_new', 'laterality_new', 'view_position_new', 'photometric_interpretation_new']
-    step2_df[cols_to_fix] = step2_df[cols_to_fix].fillna('NaN')
-
-    # Vectorized string join
-    step2_df['filename_new'] = (step2_df['pat_id'].astype(str) + "_" + 
-                              step2_df['study_date'].astype(str) + "_" + 
-                              step2_df['bodypart_new'] + "_" + 
-                              step2_df['laterality_new'] + "_" + 
-                              step2_df['view_position_new'] + "_" + 
-                              step2_df['photometric_interpretation_new'])
-    
     step2_df.to_csv(os.path.join(output_folder, "csvs/step2_metadata_df.csv"), index=False, errors='replace')
     logger.info(f"Finished new filename creation. Step 2 done! Time: {datetime.datetime.now()}")
     

@@ -3,124 +3,117 @@
 The matching and the text normalisation it runs against live here too --
 they exist for these rules and nothing else.
 """
-import pathlib
+from __future__ import annotations
+
+import logging
 import re
 import unicodedata
+from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import yaml
 
-
-RULES = pathlib.Path(__file__).parent / "config" / "rules.yaml"
-
-with open(RULES, encoding="utf-8") as f:
-    cfg = yaml.safe_load(f)["categories"]
+RULES = Path(__file__).parent / "config" / "rules.yaml"
 
 
-def add_InfosViaRegEx(df, cfg=cfg):
-    """Add bodypart_new, laterality_new, view_position_new and
-    photometric_interpretation_new, falling back to the free text fields.
-
-    Column names are the ones the pipeline reads from the DICOM tags.
-    """
-    # --- Bodypart ---
-    categorize_column_regex(
-        df, 'bodypart_new', 'body_part_examined', cfg['bodypart'],
-        fallbacks=[('study_description', cfg['study_description_bodypart']),
-                   ('series_description', cfg['series_description_bodypart'])])
-    df['bodypart_new'] = df['bodypart_new'].map({'foot': 'F', 'hand': 'H',
-                                                 'other': 'O'})
-
-    # --- Laterality ---
-    categorize_column_regex(
-        df, 'laterality_new', 'laterality', cfg['laterality'],
-        fallbacks=[('view_position', cfg['view_position_laterality']),
-                   ('series_description', cfg['series_description_laterality'])])
-
-    # --- View position ---
-    categorize_column_regex(
-        df, 'view_position_new', 'view_position', cfg['view_position_viewposition'],
-        fallbacks=[('series_description', cfg['series_description_viewposition'])])
-
-    # --- Photometric ---
-    categorize_column_regex(
-        df, 'photometric_interpretation_new', 'photometric_interpretation',
-        cfg['photometric'])
-    return df
+def load_rules(path=None) -> dict:
+    """Load the rule set (default: the bundled config/rules.yaml)."""
+    with open(path or RULES, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)["categories"]
 
 
-def normalize_text(x):
+def normalize_text(x) -> str:
+    """Bring text into the form the patterns in rules.yaml run against."""
     if pd.isna(x):
-        return "" #np.nan
+        return ""
+    x = unicodedata.normalize("NFKC", str(x)).lower().strip()
+    x = (x.replace("ß", "ss").replace("ä", "ae")
+          .replace("ö", "oe").replace("ü", "ue"))
+    x = x.replace("fu?", "fuss").replace("vorfu?", "vorfuss")
+    x = x.replace("schr?g", "schraeg").replace("extremit?ten", "extremitaeten")
+    x = re.sub(r"[.,;:]+", " ", x)
+    return re.sub(r"\s+", " ", x)
 
-    x = str(x)
-    x = unicodedata.normalize("NFKC", x)
-    x = x.lower().strip()
 
-    # Umlaute / deutsche Sonderzeichen
-    x = (
-        x.replace("ß", "ss")
-         .replace("ä", "ae")
-         .replace("ö", "oe")
-         .replace("ü", "ue")
+def _first_match(text: pd.Series, rules: dict) -> pd.Series:
+    """First label whose pattern matches -- NA otherwise.
+
+    The label order in rules.yaml is the priority: "oblique" before "lat",
+    otherwise the pattern for ll already swallows the llo.
+    """
+    result = pd.Series(pd.NA, index=text.index, dtype="object")
+    for label, patterns in rules.items():
+        open_rows = result.isna()
+        if not open_rows.any():
+            break
+        hit = text.str.contains("|".join(patterns), regex=True, na=False)
+        result[open_rows & hit] = label
+    return result
+
+
+def _coalesce(*columns: pd.Series) -> pd.Series:
+    """Walk the columns in order and take the first value that is set."""
+    result = columns[0].copy()
+    for other in columns[1:]:
+        result = result.where(result.notna(), other)
+    return result
+
+
+def categorize(df: pd.DataFrame, rules: dict, log=None) -> pd.DataFrame:
+    """Set body part, side, view, photometry and file name.
+
+    Each category is taken from its DICOM tag first and from the free text
+    fields only where the tag says nothing.
+    """
+    log = log or logging.getLogger(__name__)
+    df = df.copy()
+    tag = {c: df[c].map(normalize_text) for c in
+           ("body_part_examined", "laterality", "view_position",
+            "photometric_interpretation")}
+    text = {c: df[c].map(normalize_text) for c in
+            ("series_description", "study_description")}
+
+    # --- body part --------------------------------------------------------
+    df["bodypart_new"] = _coalesce(
+        _first_match(tag["body_part_examined"], rules["bodypart"]),
+        _first_match(text["study_description"], rules["study_description_bodypart"]),
+        _first_match(text["series_description"], rules["series_description_bodypart"]),
+    ).map({"foot": "F", "hand": "H", "other": "O"})
+
+    # --- side -------------------------------------------------------------
+    df["laterality_new"] = _coalesce(
+        _first_match(tag["laterality"], rules["laterality"]),
+        _first_match(tag["view_position"], rules["view_position_laterality"]),
+        _first_match(text["series_description"], rules["series_description_laterality"]),
     )
 
-    # Häufige Encoding-Probleme in deinem Datensatz
-    x = x.replace("fu?", "fuss")
-    x = x.replace("vorfu?", "vorfuss")
-    x = x.replace("schr?g", "schraeg")
-    x = x.replace("extremit?ten", "extremitaeten")
+    # --- view -------------------------------------------------------------
+    df["view_position_new"] = _coalesce(
+        _first_match(tag["view_position"], rules["view_position_viewposition"]),
+        _first_match(text["series_description"], rules["series_description_viewposition"]),
+    )
 
-    # Interpunktion teilweise vereinheitlichen, aber / behalten
-    x = re.sub(r"[.,;:]+", " ", x)
-    x = re.sub(r"\s+", " ", x)
+    # --- photometry -------------------------------------------------------
+    df["photometric_interpretation_new"] = _first_match(
+        tag["photometric_interpretation"], rules["photometric"])
 
-    return x
+    cols = ["bodypart_new", "laterality_new", "view_position_new",
+            "photometric_interpretation_new"]
+    df[cols] = df[cols].fillna("NaN")
+    df["filename_new"] = (df["pat_id"].astype(str) + "_"
+                          + df["study_date"].astype(str) + "_"
+                          + df["bodypart_new"] + "_" + df["laterality_new"] + "_"
+                          + df["view_position_new"] + "_"
+                          + df["photometric_interpretation_new"])
 
-
-def categorize_column_regex(
-    df,
-    target_col,
-    primary_tag,
-    mapping_regex,
-    fallbacks=None,
-):
-    """
-    Kategorisierung mit Regex.
-    Die Reihenfolge der Labels im YAML bestimmt die Priorität.
-    """
-
-    #df[target_col] = np.nan
-    df[target_col] = pd.Series(pd.NA, index=df.index, dtype="object")
-
-    def apply_rules(source_col, rules, only_empty=True):
-        source_norm = df[source_col].map(normalize_text)
-
-        # Wichtig: Reihenfolge aus YAML wird übernommen
-        for label, patterns in rules.items():
-            pattern = "|".join(patterns)
-
-            match_mask = source_norm.str.contains(
-                pattern,
-                regex=True,
-                na=False
-            )
-
-            if only_empty:
-                match_mask = df[target_col].isna() & match_mask
-
-            df.loc[match_mask, target_col] = label
-
-    # Priority 1: primary DICOM tag
-    apply_rules(primary_tag, mapping_regex, only_empty=True)
-
-    # Priority 2: fallback columns, nur noch NaN-Zeilen
-    if fallbacks:
-        for col, fallback_mapping in fallbacks:
-            if not df[target_col].isna().any():
-                break
-
-            apply_rules(col, fallback_mapping, only_empty=True)
-
+    log.info("categories derived: "
+             + ", ".join(f"{c.replace('_new', '')}={df[c].ne('NaN').sum()}/{len(df)}"
+                         for c in cols))
     return df
+
+
+def rebuild_filename(row) -> str:
+    """File name from the categories -- rebuild after every change to them."""
+    return (f"{row['pat_id']}_{row['study_date']}_{row['bodypart_new']}_"
+            f"{row['laterality_new']}_{row['view_position_new']}_"
+            f"{row['photometric_interpretation_new']}_{row['dup_suffix']}")

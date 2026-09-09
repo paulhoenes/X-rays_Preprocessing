@@ -81,10 +81,3 @@ def get_unique_metadata(df, exclude_cols):
 
 
  
-def rebuild_filename(row):
-
-    return (
-        f"{row['pat_id']}_{row['study_date']}_{row['bodypart_new']}_"
-        f"{row['laterality_new']}_{row['view_position_new']}_"
-        f"{row['photometric_interpretation_new']}_{row['dup_suffix']}"
-    )
